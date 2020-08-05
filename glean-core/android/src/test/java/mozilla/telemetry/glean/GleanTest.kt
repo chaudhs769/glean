@@ -5,6 +5,7 @@
 package mozilla.telemetry.glean
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -27,6 +28,7 @@ import mozilla.telemetry.glean.private.NoExtraKeys
 import mozilla.telemetry.glean.private.NoReasonCodes
 import mozilla.telemetry.glean.private.PingType
 import mozilla.telemetry.glean.private.StringMetricType
+import mozilla.telemetry.glean.private.TimeUnit
 import mozilla.telemetry.glean.rust.LibGleanFFI
 import mozilla.telemetry.glean.rust.toBoolean
 import mozilla.telemetry.glean.rust.toByte
@@ -35,6 +37,8 @@ import mozilla.telemetry.glean.scheduler.PingUploadWorker
 import mozilla.telemetry.glean.testing.GleanTestRule
 import mozilla.telemetry.glean.utils.getLanguageFromLocale
 import mozilla.telemetry.glean.utils.getLocaleTag
+import mozilla.telemetry.glean.scheduler.MetricsPingScheduler
+import mozilla.telemetry.glean.utils.getISOTimeString
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -52,7 +56,7 @@ import org.robolectric.shadows.ShadowLog
 import java.io.File
 import java.util.Calendar
 import java.util.Locale
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeUnit as AndroidTimeUnit
 
 @ObsoleteCoroutinesApi
 @RunWith(AndroidJUnit4::class)
@@ -84,7 +88,7 @@ class GleanTest {
         // we are only expecting one baseline ping.
         assertEquals(server.requestCount, 1)
 
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         val docType = request.path.split("/")[3]
         assertEquals("baseline", docType)
     }
@@ -102,7 +106,7 @@ class GleanTest {
         // Now trigger it to upload
         triggerWorkManager(context)
 
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         assertEquals(request.getHeader("X-Debug-ID"), "this-ping-is-tagged")
     }
 
@@ -208,7 +212,7 @@ class GleanTest {
             triggerWorkManager(context)
 
             for (i in 0..3) {
-                val request = server.takeRequest(20L, TimeUnit.SECONDS)
+                val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
                 val docType = request.path.split("/")[3]
                 val json = JSONObject(request.getPlainBody())
                 checkPingSchema(json)
@@ -268,7 +272,7 @@ class GleanTest {
             // Trigger worker task to upload the pings in the background
             triggerWorkManager(context)
 
-            val request = server.takeRequest(20L, TimeUnit.SECONDS)
+            val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
             val docType = request.path.split("/")[3]
             assertEquals("The received ping must be a 'baseline' ping", "baseline", docType)
 
@@ -472,7 +476,7 @@ class GleanTest {
         triggerWorkManager(context)
 
         // Validate the received data.
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         val docType = request.path.split("/")[3]
         assertEquals(pingName, docType)
 
@@ -604,7 +608,7 @@ class GleanTest {
         // Now trigger it to upload
         triggerWorkManager(context)
 
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         val jsonContent = JSONObject(request.getPlainBody())
         assertEquals(
             110,
@@ -640,7 +644,7 @@ class GleanTest {
         // Now trigger it to upload
         triggerWorkManager(context)
 
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         val docType = request.path.split("/")[3]
         assertEquals("deletion-request", docType)
     }
@@ -670,6 +674,15 @@ class GleanTest {
 
     @Test
     fun `test sending of startup baseline ping with application lifetime metric`() {
+        // Let's tell the MPS that we just sent a metrics ping.
+        // This way we won't trigger it again here.
+        val fakeNowDoNotSend = Calendar.getInstance()
+        fakeNowDoNotSend.clear()
+        fakeNowDoNotSend.set(2015, 6, 11, 4, 0, 0)
+        SystemClock.setCurrentTimeMillis(fakeNowDoNotSend.timeInMillis)
+        val fakeMpsSetter = spy(MetricsPingScheduler(context))
+        fakeMpsSetter.updateSentDate(getISOTimeString(fakeNowDoNotSend, truncateTo = TimeUnit.Day))
+
         // Set the dirty flag.
         LibGleanFFI.INSTANCE.glean_set_dirty_flag(true.toByte())
 
@@ -693,7 +706,7 @@ class GleanTest {
             // Trigger worker task to upload the pings in the background
             triggerWorkManager(context)
 
-            val request = server.takeRequest(20L, TimeUnit.SECONDS)
+            val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
             val docType = request.path.split("/")[3]
             assertEquals("The received ping must be a 'baseline' ping", "baseline", docType)
 
@@ -815,7 +828,7 @@ class GleanTest {
         // Trigger it to upload
         triggerWorkManager(context)
 
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         assertEquals(request.getHeader("X-Debug-ID"), "valid-tag")
     }
 
@@ -883,7 +896,7 @@ class GleanTest {
         triggerWorkManager(context)
 
         // Validate the received data.
-        val request = server.takeRequest(20L, TimeUnit.SECONDS)
+        val request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         val docType = request.path.split("/")[3]
         assertEquals("deletion-request", docType)
     }

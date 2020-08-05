@@ -21,10 +21,11 @@ import mozilla.telemetry.glean.getContextWithMockedInfo
 import mozilla.telemetry.glean.getMockWebServer
 import mozilla.telemetry.glean.resetGlean
 import java.lang.NullPointerException
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeUnit as AndroidTimeUnit
 import mozilla.telemetry.glean.testing.ErrorType
 import mozilla.telemetry.glean.testing.GleanTestRule
 import mozilla.telemetry.glean.triggerWorkManager
+import mozilla.telemetry.glean.scheduler.MetricsPingScheduler
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +35,9 @@ import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.Calendar
+import org.mockito.Mockito.spy
+import mozilla.telemetry.glean.utils.getISOTimeString
 
 // Declared here, since Kotlin can not declare nested enum classes.
 enum class clickKeys {
@@ -264,7 +268,7 @@ class EventMetricTypeTest {
 
         triggerWorkManager(context)
 
-        val request = server.takeRequest(1L, TimeUnit.SECONDS)
+        val request = server.takeRequest(1L, AndroidTimeUnit.SECONDS)
         assertEquals("POST", request.method)
         val applicationId = "mozilla-telemetry-glean-test"
         assert(
@@ -289,9 +293,19 @@ class EventMetricTypeTest {
     @Suppress("LongMethod")
     @Test
     fun `flush queued events on startup and correctly handle pre-init events`() {
+        val context = getContextWithMockedInfo()
+
+        // Let's tell the MPS that we just sent a metrics ping.
+        // This way we won't trigger it again here.
+        val fakeNowDoNotSend = Calendar.getInstance()
+        fakeNowDoNotSend.clear()
+        fakeNowDoNotSend.set(2015, 6, 11, 4, 0, 0)
+        SystemClock.setCurrentTimeMillis(fakeNowDoNotSend.timeInMillis)
+        val fakeMpsSetter = spy(MetricsPingScheduler(context))
+        fakeMpsSetter.updateSentDate(getISOTimeString(fakeNowDoNotSend, truncateTo = TimeUnit.Day))
+
         val server = getMockWebServer()
 
-        val context = getContextWithMockedInfo()
         resetGlean(
             context,
             Glean.configuration.copy(
@@ -328,7 +342,7 @@ class EventMetricTypeTest {
         // Trigger worker task to upload the pings in the background
         triggerWorkManager(context)
 
-        var request = server.takeRequest(20L, TimeUnit.SECONDS)
+        var request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         var pingJsonData = request.getPlainBody()
         var pingJson = JSONObject(pingJsonData)
         checkPingSchema(pingJson)
@@ -353,7 +367,7 @@ class EventMetricTypeTest {
         // Trigger worker task to upload the pings in the background
         triggerWorkManager(context)
 
-        request = server.takeRequest(20L, TimeUnit.SECONDS)
+        request = server.takeRequest(20L, AndroidTimeUnit.SECONDS)
         pingJsonData = request.getPlainBody()
         pingJson = JSONObject(pingJsonData)
         checkPingSchema(pingJson)
